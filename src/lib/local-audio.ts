@@ -1,4 +1,5 @@
 import type { Track } from "@/lib/types";
+import { createId } from "@/lib/utils";
 
 const DB_NAME = "aura-local-audio";
 const STORE_NAME = "tracks";
@@ -62,7 +63,7 @@ export async function saveLocalAudio(file: File): Promise<Track> {
   }
   if (file.size > 50 * 1024 * 1024) throw new Error("Local files must be 50 MB or smaller.");
   const base = file.name.replace(/\.[^.]+$/, "").trim() || "Untitled";
-  const id = crypto.randomUUID();
+  const id = createId();
   const stored: StoredAudio = {
     id,
     title: base,

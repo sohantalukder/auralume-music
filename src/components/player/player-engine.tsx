@@ -5,20 +5,43 @@ import { selectCurrentTrack, usePlayerStore } from "@/stores/player-store";
 import { equalizerFrequencies } from "@/lib/customization";
 
 type PlayerEngine = {
-  currentTime: number;
   duration: number;
-  buffered: number;
   loading: boolean;
   error?: string;
   seek: (seconds: number) => void;
 };
 
+type PlayerProgress = {
+  currentTime: number;
+  buffered: number;
+};
+
+// Progress changes several times a second, so it lives in its own context to
+// keep controls that only need duration/loading from re-rendering with it.
 const PlayerEngineContext = createContext<PlayerEngine | null>(null);
+const PlayerProgressContext = createContext<PlayerProgress | null>(null);
 
 export function usePlayerEngine() {
   const value = useContext(PlayerEngineContext);
   if (!value) throw new Error("usePlayerEngine must be used inside PlayerEngineProvider");
   return value;
+}
+
+export function usePlayerProgress() {
+  const value = useContext(PlayerProgressContext);
+  if (!value) throw new Error("usePlayerProgress must be used inside PlayerEngineProvider");
+  return value;
+}
+
+function updatePositionState(audio: HTMLAudioElement) {
+  if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState) return;
+  const duration = audio.duration;
+  if (!Number.isFinite(duration) || duration <= 0) return;
+  try {
+    navigator.mediaSession.setPositionState({ duration, position: Math.min(audio.currentTime, duration), playbackRate: audio.playbackRate || 1 });
+  } catch {
+    // Some browsers reject transient states while a source is loading.
+  }
 }
 
 export function PlayerEngineProvider({ children }: { children: React.ReactNode }) {
@@ -40,6 +63,8 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
   const [error, setError] = useState<string>();
 
   useEffect(() => {
+    // One element for every source: mobile browsers only keep playing (and allow
+    // the next track to start) on the lock screen when the same element is reused.
     const audio = new Audio();
     audio.preload = "metadata";
     audio.crossOrigin = "anonymous";
@@ -48,8 +73,23 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
       setCurrentTime(audio.currentTime || 0);
       setBuffered(audio.buffered.length ? audio.buffered.end(audio.buffered.length - 1) : 0);
     };
-    const metadata = () => { setDuration(Number.isFinite(audio.duration) ? audio.duration : 0); setLoading(false); };
-    const ended = () => next("complete");
+    const metadata = () => {
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+      setLoading(false);
+      updatePositionState(audio);
+    };
+    const position = () => updatePositionState(audio);
+    const ended = () => {
+      const before = selectCurrentTrack(usePlayerStore.getState())?.id;
+      next("complete");
+      const state = usePlayerStore.getState();
+      // Repeat-one, or repeat-all on a one-track queue, keeps the same track, so
+      // the src effect never re-runs; restart the element directly.
+      if (state.isPlaying && selectCurrentTrack(state)?.id === before) {
+        audio.currentTime = 0;
+        void audio.play().catch(() => pause());
+      }
+    };
     const waiting = () => setLoading(true);
     const playing = () => { setLoading(false); setError(undefined); };
     const failed = () => {
@@ -67,12 +107,18 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
         return;
       }
       setLoading(false);
-      setError("This track could not be played. Try another search result.");
-      pause();
+      setError(`"${active?.title ?? "This track"}" could not be played, so it was skipped.`);
+      // Skip instead of stopping so one broken stream doesn't end a locked-screen session.
+      const { queue, currentIndex, repeat, shuffle } = usePlayerStore.getState();
+      if (queue.length > 1 && (shuffle || repeat === "all" || currentIndex + 1 < queue.length)) next("skip");
+      else pause();
     };
     audio.addEventListener("timeupdate", time);
     audio.addEventListener("progress", time);
     audio.addEventListener("loadedmetadata", metadata);
+    audio.addEventListener("seeked", position);
+    audio.addEventListener("ratechange", position);
+    audio.addEventListener("play", position);
     audio.addEventListener("ended", ended);
     audio.addEventListener("waiting", waiting);
     audio.addEventListener("playing", playing);
@@ -81,6 +127,9 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
       audio.removeEventListener("timeupdate", time);
       audio.removeEventListener("progress", time);
       audio.removeEventListener("loadedmetadata", metadata);
+      audio.removeEventListener("seeked", position);
+      audio.removeEventListener("ratechange", position);
+      audio.removeEventListener("play", position);
       audio.removeEventListener("ended", ended);
       audio.removeEventListener("waiting", waiting);
       audio.removeEventListener("playing", playing);
@@ -118,8 +167,26 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
       }
     }
     filtersRef.current.forEach((filter, index) => { filter.gain.value = equalizer.enabled ? (equalizer.gains[index] ?? 0) : 0; });
-    if (equalizer.enabled && isPlaying) void audioContextRef.current?.resume().catch(() => undefined);
+    if (isPlaying) void audioContextRef.current?.resume().catch(() => undefined);
   }, [equalizer, isPlaying]);
+
+  useEffect(() => {
+    // Once audio is routed through Web Audio, a suspended context (iOS does this on
+    // lock or interruption) silences playback, so resume it whenever we should be playing.
+    const resumeContext = () => {
+      const context = audioContextRef.current;
+      if (context && context.state !== "running" && context.state !== "closed" && usePlayerStore.getState().isPlaying) {
+        void context.resume().catch(() => undefined);
+      }
+    };
+    const context = audioContextRef.current;
+    context?.addEventListener("statechange", resumeContext);
+    document.addEventListener("visibilitychange", resumeContext);
+    return () => {
+      context?.removeEventListener("statechange", resumeContext);
+      document.removeEventListener("visibilitychange", resumeContext);
+    };
+  }, [equalizer.enabled]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -138,15 +205,21 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
       });
     } else if (audio.src !== new URL(current.streamUrl, window.location.href).href) {
       retryCountRef.current = 0;
-      setError(undefined);
       audio.src = current.streamUrl;
       audio.load();
       setCurrentTime(0);
+      setBuffered(0);
       setDuration(current.duration ?? 0);
       setLoading(true);
     }
     if ("mediaSession" in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: current.title, artist: current.artist, album: current.album, artwork: current.artwork ? [{ src: new URL(current.artwork, window.location.href).href }] : undefined });
+      const artwork = current.artwork ? new URL(current.artwork, window.location.href).href : undefined;
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: current.title,
+        artist: current.artist,
+        album: current.album,
+        artwork: artwork ? [{ src: artwork, sizes: "512x512" }] : undefined,
+      });
     }
     return () => { if (resetFrame !== undefined) window.cancelAnimationFrame(resetFrame); };
   }, [current]);
@@ -154,11 +227,17 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !current) return;
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
     if (!current.streamUrl) {
       audio.pause();
       return;
     }
-    if (isPlaying) audio.play().catch(() => { setError("Press play to start audio in this browser."); pause(); });
+    if (isPlaying) audio.play().catch((cause: unknown) => {
+      // AbortError means a newer src replaced this one; the next play() call handles it.
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setError("Press play to start audio in this browser.");
+      pause();
+    });
     else audio.pause();
   }, [current, isPlaying, pause]);
 
@@ -168,42 +247,56 @@ export function PlayerEngineProvider({ children }: { children: React.ReactNode }
     audioRef.current.muted = muted;
   }, [volume, muted]);
 
-  useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-    navigator.mediaSession.setActionHandler("play", () => usePlayerStore.getState().resume());
-    navigator.mediaSession.setActionHandler("pause", () => usePlayerStore.getState().pause());
-    navigator.mediaSession.setActionHandler("nexttrack", () => usePlayerStore.getState().next());
-    navigator.mediaSession.setActionHandler("previoustrack", () => usePlayerStore.getState().previous());
-    navigator.mediaSession.setActionHandler("seekbackward", (details) => {
-      if (audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - (details.seekOffset ?? 10));
-    });
-    navigator.mediaSession.setActionHandler("seekforward", (details) => {
-      if (audioRef.current) audioRef.current.currentTime = Math.min(audioRef.current.duration || Infinity, audioRef.current.currentTime + (details.seekOffset ?? 10));
-    });
-    navigator.mediaSession.setActionHandler("seekto", (details) => {
-      if (audioRef.current && details.seekTime !== undefined) audioRef.current.currentTime = details.seekTime;
-    });
+  const seek = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, Math.min(seconds, audio.duration || seconds));
   }, []);
 
   useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const audio = () => audioRef.current;
+    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+      ["play", () => usePlayerStore.getState().resume()],
+      ["pause", () => usePlayerStore.getState().pause()],
+      ["nexttrack", () => usePlayerStore.getState().next()],
+      ["previoustrack", () => usePlayerStore.getState().previous()],
+      ["seekbackward", (details) => { const element = audio(); if (element) seek(element.currentTime - (details.seekOffset ?? 10)); }],
+      ["seekforward", (details) => { const element = audio(); if (element) seek(element.currentTime + (details.seekOffset ?? 10)); }],
+      ["seekto", (details) => { if (details.seekTime !== undefined) seek(details.seekTime); }],
+    ];
+    for (const [action, handler] of handlers) {
+      try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* unsupported action */ }
+    }
+    return () => {
+      for (const [action] of handlers) {
+        try { navigator.mediaSession.setActionHandler(action, null); } catch { /* unsupported action */ }
+      }
+    };
+  }, [seek]);
+
+  useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement)?.matches("input, textarea, select, [contenteditable=true]")) return;
+      if ((event.target as HTMLElement)?.matches("input, textarea, select, button, [role=slider], [contenteditable=true]")) return;
       if (event.code === "Space") {
         event.preventDefault();
         if (usePlayerStore.getState().isPlaying) usePlayerStore.getState().pause();
         else usePlayerStore.getState().resume();
       }
-      const active = selectCurrentTrack(usePlayerStore.getState());
-      if (active && event.code === "ArrowRight" && event.altKey && audioRef.current) audioRef.current.currentTime += 10;
-      if (active && event.code === "ArrowLeft" && event.altKey && audioRef.current) audioRef.current.currentTime -= 10;
+      const element = audioRef.current;
+      if (!element || !event.altKey) return;
+      if (event.code === "ArrowRight") seek(element.currentTime + 10);
+      if (event.code === "ArrowLeft") seek(element.currentTime - 10);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [seek]);
 
-  const seek = useCallback((seconds: number) => {
-    if (audioRef.current) audioRef.current.currentTime = Math.max(0, Math.min(seconds, audioRef.current.duration || seconds));
-  }, []);
-  const value = useMemo(() => ({ currentTime, duration, buffered, loading, error, seek }), [buffered, currentTime, duration, error, loading, seek]);
-  return <PlayerEngineContext.Provider value={value}>{children}</PlayerEngineContext.Provider>;
+  const engine = useMemo(() => ({ duration, loading, error, seek }), [duration, error, loading, seek]);
+  const progress = useMemo(() => ({ currentTime, buffered }), [buffered, currentTime]);
+  return (
+    <PlayerEngineContext.Provider value={engine}>
+      <PlayerProgressContext.Provider value={progress}>{children}</PlayerProgressContext.Provider>
+    </PlayerEngineContext.Provider>
+  );
 }

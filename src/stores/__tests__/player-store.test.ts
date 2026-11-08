@@ -38,7 +38,7 @@ const youtubeTrack: Track = {
 describe("player store", () => {
   beforeEach(() => {
     localStorage.clear();
-    usePlayerStore.setState({ queue: [], currentIndex: -1, isPlaying: false, likedIds: [], history: [], playlists: [], shuffle: false, repeat: "off", preferences: { artists: [], genres: [], languages: [] } });
+    usePlayerStore.setState({ queue: [], currentIndex: -1, isPlaying: false, likedIds: [], likedTracks: [], history: [], playlists: [], shuffle: false, repeat: "off", preferences: { artists: [], genres: [], languages: [] } });
   });
 
   it("plays a track and builds the playable queue", () => {
@@ -83,21 +83,33 @@ describe("player store", () => {
   });
 
   it("toggles likes without duplicates", () => {
-    usePlayerStore.getState().toggleLike(localTracks[0].id);
-    usePlayerStore.getState().toggleLike(localTracks[0].id);
+    usePlayerStore.getState().toggleLike(localTracks[0]);
+    usePlayerStore.getState().toggleLike(localTracks[0]);
     expect(usePlayerStore.getState().likedIds).toEqual([]);
+    expect(usePlayerStore.getState().likedTracks).toEqual([]);
+  });
+
+  it("keeps a snapshot of liked tracks that were never played", () => {
+    usePlayerStore.getState().toggleLike(youtubeTrack);
+    expect(usePlayerStore.getState().history).toEqual([]);
+    expect(usePlayerStore.getState().likedTracks).toEqual([youtubeTrack]);
   });
 
   it("keeps current sources and removes legacy records from persisted browser data", () => {
     const migrated = migratePersistedLibrary({
       volume: 0.6,
+      queue: [localTracks[0], archiveTrack, youtubeTrack],
+      currentIndex: 1,
       likedIds: ["remote:old", localTracks[0].id, archiveTrack.id, youtubeTrack.id],
       history: [{ id: "remote:old" }, localTracks[0], archiveTrack, youtubeTrack],
       playlists: [{ id: "one", name: "Saved", description: "", createdAt: "2026-01-01", trackIds: ["remote:old", localTracks[0].id, archiveTrack.id, youtubeTrack.id] }],
     });
 
     expect(migrated.volume).toBe(0.6);
+    expect(migrated.queue).toEqual([archiveTrack, youtubeTrack]);
+    expect(migrated.currentIndex).toBe(0);
     expect(migrated.likedIds).toEqual([localTracks[0].id, archiveTrack.id, youtubeTrack.id]);
+    expect(migrated.likedTracks).toEqual([{ ...localTracks[0], playable: false, streamUrl: undefined }, archiveTrack, youtubeTrack]);
     expect(migrated.history).toEqual([archiveTrack, youtubeTrack]);
     expect(migrated.playlists?.[0].trackIds).toEqual([localTracks[0].id, archiveTrack.id, youtubeTrack.id]);
     expect(migrated.playlists?.[0].tracks).toEqual([{ ...localTracks[0], playable: false, streamUrl: undefined }, archiveTrack, youtubeTrack]);

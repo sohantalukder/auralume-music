@@ -1,10 +1,10 @@
 "use client";
 
 import { FileAudio, ShieldCheck, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { deleteLocalAudio, listLocalAudio, saveLocalAudio } from "@/lib/local-audio";
+import { deleteLocalAudio, saveLocalAudio } from "@/lib/local-audio";
 import { usePlayerStore } from "@/stores/player-store";
 import { TrackRow } from "@/components/track-row";
 import { APP_NAME } from "@/lib/brand";
@@ -12,13 +12,10 @@ import { APP_NAME } from "@/lib/brand";
 export function LocalFilePicker() {
   const inputRef = useRef<HTMLInputElement>(null);
   const localTracks = usePlayerStore((state) => state.localTracks);
-  const setLocalTracks = usePlayerStore((state) => state.setLocalTracks);
   const addLocalTrack = usePlayerStore((state) => state.addLocalTrack);
   const removeLocalTrack = usePlayerStore((state) => state.removeLocalTrack);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
-
-  useEffect(() => { listLocalAudio().then(setLocalTracks).catch(() => setMessage("Local browser storage is unavailable.")); }, [setLocalTracks]);
 
   const pickFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -31,7 +28,10 @@ export function LocalFilePicker() {
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  const remove = async (id: string) => { await deleteLocalAudio(id); removeLocalTrack(id); };
+  const remove = async (id: string) => {
+    try { await deleteLocalAudio(id); removeLocalTrack(id); }
+    catch { setMessage("Could not remove this file from browser storage."); }
+  };
 
   return (
     <section className="local-section">

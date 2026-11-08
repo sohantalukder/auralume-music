@@ -29,7 +29,7 @@ export function SearchScreen() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const recordedKey = useRef("");
 
-  useEffect(() => { loadPersonalizationProfile().then(setProfile); }, []);
+  useEffect(() => { loadPersonalizationProfile().then(setProfile).catch(() => undefined); }, []);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
     update();

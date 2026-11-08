@@ -11,7 +11,7 @@ export const equalizerPresets: Record<EqualizerSettings["preset"], number[]> = {
 };
 
 export const defaultEqualizer: EqualizerSettings = { enabled: false, preset: "flat", gains: [...equalizerPresets.flat] };
-export const defaultAppearance: AppearanceSettings = { enabled: false, background: "#0b0d09", surface: "#131610", foreground: "#f5f8ef", accent: "#b8f33c" };
+export const defaultAppearance: AppearanceSettings = { enabled: false, background: "#0b0a10", surface: "#15131c", foreground: "#f6f3fb", accent: "#ff7ab6" };
 
 export function normalizeEqualizer(value?: Partial<EqualizerSettings>): EqualizerSettings {
   const preset = value?.preset && value.preset in equalizerPresets ? value.preset : "flat";

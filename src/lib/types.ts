@@ -88,8 +88,4 @@ export type AppearanceSettings = {
   accent: string;
 };
 
-export type YouTubeLibrary = {
-  tracks: Track[];
-  playlists: Playlist[];
-};
 

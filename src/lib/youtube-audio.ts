@@ -1,5 +1,6 @@
 import "server-only";
-import { Innertube } from "youtubei.js";
+import { Innertube, Platform } from "youtubei.js";
+import { getYouTubeContentPoToken } from "@/lib/youtube-potoken";
 
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const MAX_AUDIO_BYTES = 250 * 1024 * 1024;
@@ -18,12 +19,18 @@ let clientPromise: Promise<Innertube> | undefined;
 const targets = new Map<string, CachedTarget>();
 const pending = new Map<string, Promise<YouTubeAudioTarget>>();
 
+// The MWEB fallback deciphers stream URLs with YouTube's player script.
+Platform.shim.eval = async (data) => new Function(data.output)();
+
 function client() {
   clientPromise ??= Innertube.create({
     generate_session_locally: false,
     lang: "en",
-    location: "BD",
     retrieve_player: true,
+  }).catch((error: unknown) => {
+    // Don't keep a failed session for the lifetime of the server instance.
+    clientPromise = undefined;
+    throw error;
   });
   return clientPromise;
 }
@@ -60,6 +67,18 @@ async function resolveFresh(videoId: string) {
     } catch (error) {
       lastError = error;
     }
+  }
+  try {
+    const poToken = await getYouTubeContentPoToken(videoId);
+    const info = await innertube.getBasicInfo(videoId, { client: "MWEB", po_token: poToken });
+    const format = info.chooseFormat({ format: "mp4", quality: "best", type: "audio" });
+    const streamUrl = new URL(await format.decipher(innertube.session.player));
+    streamUrl.searchParams.set("pot", poToken);
+    const target = validateTarget(streamUrl.href, format.mime_type, Number(format.content_length), 16 * 1024);
+    targets.set(videoId, { target, expiresAt: cacheExpiry(target.url) });
+    return target;
+  } catch (error) {
+    lastError = error;
   }
   throw lastError instanceof Error ? lastError : new Error("No audio stream available");
 }

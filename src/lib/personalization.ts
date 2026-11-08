@@ -7,6 +7,7 @@ import type {
   SearchEvent,
   Track,
 } from "@/lib/types";
+import { createId } from "@/lib/utils";
 
 const DB_NAME = "aura-personalization";
 const DB_VERSION = 1;
@@ -62,9 +63,7 @@ async function withStore<T>(storeName: string, mode: IDBTransactionMode, operati
   });
 }
 
-function makeId() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-}
+const makeId = createId;
 
 function normalizedCategory(value: string) {
   return value.trim().toLocaleLowerCase().slice(0, 48);

@@ -84,4 +84,35 @@ describe("YouTube audio route", () => {
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({ error: { code: "AUDIO_UNAVAILABLE", message: "This YouTube audio stream is temporarily unavailable." } });
   });
+
+  it("answers a request without a Range header with a capped partial response", async () => {
+    resolveMock.mockResolvedValue({ ...target, contentLength: 5 * 1024 * 1024 });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("audio", {
+      status: 206,
+      headers: { "content-length": "1048576", "content-range": "bytes 0-1048575/5242880" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET(request("/api/youtube/audio?videoId=IF9GJstin2g"));
+
+    expect(response.status).toBe(206);
+    expect(fetchMock).toHaveBeenCalledWith(target.url, expect.objectContaining({ headers: { Range: "bytes=0-1048575" } }));
+  });
+
+  it("stitches small upstream ranges into one response", async () => {
+    resolveMock.mockResolvedValue({ ...target, contentLength: 10, maxRangeBytes: 4 });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("abcd", { status: 206 }))
+      .mockResolvedValueOnce(new Response("efgh", { status: 206 }))
+      .mockResolvedValueOnce(new Response("ij", { status: 206 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET(request("/api/youtube/audio?videoId=IF9GJstin2g", "bytes=0-"));
+
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-range")).toBe("bytes 0-9/10");
+    expect(response.headers.get("content-length")).toBe("10");
+    await expect(response.text()).resolves.toBe("abcdefghij");
+    expect(fetchMock.mock.calls.map(([, init]) => init.headers.Range)).toEqual(["bytes=0-3", "bytes=4-7", "bytes=8-9"]);
+  });
 });

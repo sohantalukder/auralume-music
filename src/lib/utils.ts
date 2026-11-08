@@ -17,3 +17,14 @@ export function greeting(date = new Date()) {
   if (hour < 18) return "Good afternoon";
   return "Good evening";
 }
+
+/**
+ * Random id that also works outside secure contexts: crypto.randomUUID only exists on
+ * HTTPS/localhost, so opening the dev server from a phone over LAN would otherwise throw.
+ */
+export function createId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}

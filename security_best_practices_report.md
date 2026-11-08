@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-No critical or high-severity findings were identified. The app has no authentication, database, server-side music upload, arbitrary outbound URL fetcher, HTML injection sink, or command execution path. Internet Archive requests use fixed hosts, validated identifiers, bounded responses, timeouts, caching, and request throttling. Optional local audio is allowlisted by format, limited to 50 MB, stored in IndexedDB, and rendered only through the browser audio engine. The remaining item is defense-in-depth for any future public deployment.
+No critical or high-severity findings were identified. The app has no authentication, database, server-side music upload, arbitrary outbound URL fetcher, or HTML injection sink. Internet Archive requests use fixed hosts, validated identifiers, bounded responses, timeouts, caching, and request throttling. Optional local audio is allowlisted by format, limited to 50 MB, stored in IndexedDB, and rendered only through the browser audio engine. The remaining items are defense-in-depth for a public deployment.
 
 ## Critical
 
@@ -21,13 +21,21 @@ No findings.
 ### SEC-001 — Add a production Content Security Policy before public deployment
 
 - Rule ID: `NEXT-CSP-001` / `REACT-CSP-001`
-- Severity: Low for the current personal localhost-only use
-- Location: `next.config.ts:3-15`
-- Evidence: Auralume sets `nosniff`, a strict referrer policy, a permissions policy, and `X-Frame-Options: DENY`, but does not yet send a `Content-Security-Policy` header.
+- Severity: Low
+- Location: `next.config.ts`
+- Evidence: Auralume now sends a `Content-Security-Policy-Report-Only` header (self, YouTube/Archive image hosts, Archive media, `frame-ancestors 'none'`). It is not enforced yet and allows `'unsafe-inline'` scripts.
 - Impact: If a separate cross-site scripting flaw were introduced later, a CSP would reduce its impact. Current risk is limited because the app has no raw HTML rendering or third-party scripts and uses React text escaping.
 - Fix: Before making Auralume public, add a nonce-based production CSP compatible with Next.js and keep `frame-ancestors 'none'`, `object-src 'none'`, and narrowly scoped connect/media/image sources.
 - Mitigation: Existing headers, React escaping, fixed upstream hosts, and the absence of dangerous DOM sinks reduce current exposure.
 - False-positive notes: A reverse proxy or hosting platform could add CSP outside this repository; verify runtime headers if deployment changes.
+
+### SEC-002 — Server-side evaluation of YouTube scripts in the PoToken fallback
+
+- Severity: Low
+- Location: `src/lib/youtube-potoken.ts`, `src/lib/youtube-audio.ts`
+- Evidence: The final audio fallback fetches YouTube's attestation interpreter and player decipher code and runs them with `new Function`. Hosts are restricted to `youtube.com`/`google.com` over HTTPS, and the code runs only when unsigned clients fail.
+- Impact: Code supplied by YouTube runs inside the server function with access to its environment. jsdom globals are also assigned onto `globalThis`.
+- Fix: Run the fallback in an isolated function or worker without secrets in its environment, or remove the fallback if it is not needed.
 
 ## Verified controls
 
@@ -38,7 +46,8 @@ No findings.
 - The lyrics route validates and bounds every query field with Zod, rate-limits callers, uses a fixed upstream host, and applies an eight-second timeout (`src/app/api/lyrics/route.ts:6-30`).
 - Lyrics are rendered as escaped React text rather than HTML (`src/components/player/lyrics-panel.tsx:31-39`).
 - The service worker excludes API responses from its cache and deletes old cache versions (`public/sw.js:1-8`).
-- Repository scans found no `dangerouslySetInnerHTML`, direct HTML injection, `eval`, dynamic subprocesses, iframes, videos, arbitrary server-side URL fetches, or permissive CORS configuration.
+- Repository scans found no `dangerouslySetInnerHTML`, direct HTML injection, dynamic subprocesses, iframes, videos, arbitrary server-side URL fetches, or permissive CORS configuration. The only dynamic evaluation is SEC-002.
+- The YouTube audio proxy validates video IDs and ranges, accepts only `googlevideo.com` HTTPS stream hosts, caps each response at 1 MB, and returns generic errors without the signed media URL (`src/app/api/youtube/audio/route.ts`, `src/lib/youtube-audio.ts`).
 
 ## Dependency audit note
 

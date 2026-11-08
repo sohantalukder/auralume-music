@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { activeLyricIndex, parseSyncedLyrics } from "@/lib/lyrics";
 import type { LyricsResult, Track } from "@/lib/types";
 import { LyricsSkeleton } from "@/components/ui/skeleton";
+import { usePlayerEngine, usePlayerProgress } from "@/components/player/player-engine";
 
 async function fetchLyrics(track: Track, signal: AbortSignal): Promise<LyricsResult> {
   const params = new URLSearchParams({ title: track.title, artist: track.artist });
@@ -17,7 +18,9 @@ async function fetchLyrics(track: Track, signal: AbortSignal): Promise<LyricsRes
   return body;
 }
 
-export function LyricsPanel({ track, currentTime, onSeek }: { track: Track; currentTime: number; onSeek: (seconds: number) => void }) {
+export function LyricsPanel({ track }: { track: Track }) {
+  const { currentTime } = usePlayerProgress();
+  const { seek: onSeek } = usePlayerEngine();
   const lyrics = useQuery({
     queryKey: ["lyrics", track.id, track.title, track.artist],
     queryFn: ({ signal }) => fetchLyrics(track, signal),
@@ -27,7 +30,10 @@ export function LyricsPanel({ track, currentTime, onSeek }: { track: Track; curr
   const lines = useMemo(() => parseSyncedLyrics(lyrics.data?.syncedLyrics), [lyrics.data?.syncedLyrics]);
   const active = activeLyricIndex(lines, currentTime);
   const activeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => { activeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }, [active]);
+  useEffect(() => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    activeRef.current?.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+  }, [active]);
 
   return (
     <section className="lyrics-panel" aria-label="Lyrics">

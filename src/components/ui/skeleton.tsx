@@ -16,10 +16,6 @@ export function SearchMenuSkeleton() {
   return <div className="search-menu-skeleton" role="status" aria-label="Searching music" aria-busy="true">{Array.from({ length: 4 }, (_, index) => <div key={index}><Skeleton className="skeleton-menu-icon" /><span><Skeleton className="skeleton-title" /><Skeleton className="skeleton-copy" /></span><Skeleton className="skeleton-menu-art" /></div>)}</div>;
 }
 
-export function ProfileSkeleton() {
-  return <div className="profile-skeleton" role="status" aria-label="Loading profile" aria-busy="true"><Skeleton className="skeleton-avatar" /><Skeleton className="skeleton-kicker" /><Skeleton className="skeleton-profile-title" /><Skeleton className="skeleton-profile-copy" /></div>;
-}
-
 export function PageSkeleton() {
   return <div className="page-skeleton" role="status" aria-label="Loading page" aria-busy="true"><Skeleton className="skeleton-kicker" /><Skeleton className="skeleton-page-title" /><Skeleton className="skeleton-page-copy" /><TrackListSkeleton rows={5} /></div>;
 }

@@ -1,10 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { Inter, Noto_Sans_Bengali } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { PwaRegister } from "@/components/pwa-register";
 import { APP_DESCRIPTION, APP_NAME, APP_TITLE } from "@/lib/brand";
 import { getSiteUrl } from "@/lib/site-url";
+
+// Apple devices render the system SF font (see --font-sans); Inter is the closest
+// self-hosted match elsewhere. Bengali covers the many Bangla song titles.
+const bodyFont = Inter({ subsets: ["latin"], variable: "--font-body", display: "swap" });
+const bengaliFont = Noto_Sans_Bengali({ subsets: ["bengali"], variable: "--font-bengali", display: "swap" });
 
 export const metadata: Metadata = {
   metadataBase: getSiteUrl(),
@@ -41,10 +47,10 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: APP_NAME },
 };
 
-export const viewport: Viewport = { themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#0b0d09" }, { media: "(prefers-color-scheme: light)", color: "#f4f6ef" }], width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#0b0a10" }, { media: "(prefers-color-scheme: light)", color: "#faf8fc" }], width: "device-width", initialScale: 1 };
 
 const chunkRecoveryScript = `(()=>{const key="aura:chunk-reload";const recover=value=>{const message=String(value?.message||value||"");if(!/ChunkLoadError|Loading chunk .* failed|Failed to fetch dynamically imported module/i.test(message))return;try{if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,location.href)}catch{}location.reload()};addEventListener("error",event=>recover(event.error||event.message));addEventListener("unhandledrejection",event=>recover(event.reason))})()`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth"><body><Script id="chunk-recovery" strategy="beforeInteractive">{chunkRecoveryScript}</Script><Providers>{children}<PwaRegister /></Providers></body></html>;
+  return <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth" className={`${bodyFont.variable} ${bengaliFont.variable}`}><body><Script id="chunk-recovery" strategy="beforeInteractive">{chunkRecoveryScript}</Script><Providers>{children}<PwaRegister /></Providers></body></html>;
 }

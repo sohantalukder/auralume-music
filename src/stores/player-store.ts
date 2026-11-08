@@ -1,8 +1,10 @@
+import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AppearanceSettings, EqualizerSettings, ListeningPreferences, Playlist, Track } from "@/lib/types";
 import { clearPersonalization, recordRecommendationSignal } from "@/lib/personalization";
 import { defaultAppearance, defaultEqualizer, equalizerPresets, normalizeEqualizer } from "@/lib/customization";
+import { createId } from "@/lib/utils";
 
 type RepeatMode = "off" | "all" | "one";
 
@@ -15,14 +17,17 @@ type PlayerState = {
   shuffle: boolean;
   repeat: RepeatMode;
   likedIds: string[];
+  likedTracks: Track[];
   history: Track[];
   localTracks: Track[];
+  localTracksLoaded: boolean;
   syncedTracks: Track[];
   playlists: Playlist[];
   preferences: ListeningPreferences;
   equalizer: EqualizerSettings;
   appearance: AppearanceSettings;
   play: (track: Track, context?: Track[]) => void;
+  cue: (track: Track) => void;
   pause: () => void;
   resume: () => void;
   next: (reason?: "skip" | "complete") => void;
@@ -31,15 +36,14 @@ type PlayerState = {
   toggleMute: () => void;
   toggleShuffle: () => void;
   cycleRepeat: () => void;
-  toggleLike: (id: string) => void;
+  toggleLike: (track: Track) => void;
   addToQueue: (track: Track) => void;
   removeFromQueue: (index: number) => void;
   moveQueueItem: (from: number, to: number) => void;
   setLocalTracks: (tracks: Track[]) => void;
   addLocalTrack: (track: Track) => void;
   removeLocalTrack: (id: string) => void;
-  syncYouTubeLibrary: (tracks: Track[], playlists: Playlist[]) => void;
-  createPlaylist: (name: string) => void;
+  createPlaylist: (name: string) => string;
   renamePlaylist: (playlistId: string, name: string) => void;
   deletePlaylist: (playlistId: string) => void;
   addToPlaylist: (playlistId: string, track: Track) => void;
@@ -54,7 +58,7 @@ type PlayerState = {
   clearPersonalData: () => Promise<void>;
 };
 
-type PersistedLibrary = Pick<PlayerState, "volume" | "muted" | "shuffle" | "repeat" | "likedIds" | "history" | "syncedTracks" | "playlists" | "preferences" | "equalizer" | "appearance">;
+type PersistedLibrary = Pick<PlayerState, "queue" | "currentIndex" | "volume" | "muted" | "shuffle" | "repeat" | "likedIds" | "likedTracks" | "history" | "syncedTracks" | "playlists" | "preferences" | "equalizer" | "appearance">;
 
 const emptyPreferences: ListeningPreferences = { artists: [], genres: [], languages: [] };
 
@@ -70,11 +74,24 @@ export function migratePersistedLibrary(value: unknown): Partial<PersistedLibrar
   if (!value || typeof value !== "object") return {};
   const state = value as Partial<PersistedLibrary>;
   const isCurrentId = (id: unknown) => typeof id === "string" && (id.startsWith("local:") || id.startsWith("archive:") || id.startsWith("youtube:"));
-  const knownTracks = [...(Array.isArray(state.history) ? state.history : []), ...(Array.isArray(state.syncedTracks) ? state.syncedTracks : [])]
+  const persistedQueue = Array.isArray(state.queue) ? state.queue : [];
+  const queue = persistedQueue.filter((track): track is Track => Boolean(track && (track.source === "archive" || track.source === "youtube") && isCurrentId(track.id)));
+  const persistedCurrentId = Number.isInteger(state.currentIndex) ? persistedQueue[state.currentIndex as number]?.id : undefined;
+  const restoredIndex = persistedCurrentId ? queue.findIndex((track) => track.id === persistedCurrentId) : -1;
+  const currentIndex = restoredIndex >= 0 ? restoredIndex : queue.length ? 0 : -1;
+  const knownTracks = [...queue, ...(Array.isArray(state.history) ? state.history : []), ...(Array.isArray(state.syncedTracks) ? state.syncedTracks : [])]
     .filter((track): track is Track => Boolean(track && isCurrentId(track.id)));
+  const knownTrackById = new Map(knownTracks.map((track) => [track.id, track]));
+  const likedIds = Array.isArray(state.likedIds) ? state.likedIds.filter((id): id is string => isCurrentId(id)) : [];
   return {
     ...state,
-    likedIds: Array.isArray(state.likedIds) ? state.likedIds.filter((id): id is string => isCurrentId(id)) : [],
+    queue,
+    currentIndex,
+    likedIds,
+    // Liked tracks are snapshotted so they stay listed even after leaving history.
+    likedTracks: (Array.isArray(state.likedTracks) ? state.likedTracks : likedIds.map((id) => knownTrackById.get(id)))
+      .filter((track): track is Track => Boolean(track && likedIds.includes(track.id)))
+      .map(snapshotTrack),
     // Blob URLs are recreated from IndexedDB after reload, so only remote tracks
     // are safe to restore directly from persisted history.
     history: Array.isArray(state.history) ? state.history.filter((track) => (track?.source === "archive" || track?.source === "youtube") && isCurrentId(track.id)) : [],
@@ -83,7 +100,7 @@ export function migratePersistedLibrary(value: unknown): Partial<PersistedLibrar
       ? state.playlists.filter((playlist) => playlist && typeof playlist.id === "string").map((playlist) => ({
           ...playlist,
           trackIds: Array.isArray(playlist.trackIds) ? playlist.trackIds.filter(isCurrentId) : [],
-          tracks: (Array.isArray(playlist.tracks) ? playlist.tracks : knownTracks.filter((track) => playlist.trackIds?.includes(track.id))).map(snapshotTrack),
+          tracks: (Array.isArray(playlist.tracks) ? playlist.tracks : playlist.trackIds?.map((id) => knownTrackById.get(id)).filter((track): track is Track => Boolean(track)) ?? []).map(snapshotTrack),
         }))
       : [],
     preferences: {
@@ -114,8 +131,10 @@ export const usePlayerStore = create<PlayerState>()(
       shuffle: false,
       repeat: "off",
       likedIds: [],
+      likedTracks: [],
       history: [],
       localTracks: [],
+      localTracksLoaded: false,
       syncedTracks: [],
       playlists: [],
       preferences: emptyPreferences,
@@ -135,6 +154,12 @@ export const usePlayerStore = create<PlayerState>()(
           };
         });
       },
+      // Loads a track without starting it (used to restore the player from its URL);
+      // browsers block autoplay after a reload, so playback waits for the user.
+      cue: (track) => set((state) => {
+        const index = state.queue.findIndex((item) => item.id === track.id);
+        return index >= 0 ? { currentIndex: index, isPlaying: false } : { queue: [...state.queue, track], currentIndex: state.queue.length, isPlaying: false };
+      }),
       pause: () => set({ isPlaying: false }),
       resume: () => set({ isPlaying: true }),
       next: (reason = "skip") =>
@@ -157,11 +182,12 @@ export const usePlayerStore = create<PlayerState>()(
       toggleMute: () => set((state) => ({ muted: !state.muted })),
       toggleShuffle: () => set((state) => ({ shuffle: !state.shuffle })),
       cycleRepeat: () => set((state) => ({ repeat: state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off" })),
-      toggleLike: (id) => set((state) => {
-        const liked = state.likedIds.includes(id);
-        const track = [...state.queue, ...state.history, ...state.localTracks].find((item) => item.id === id);
-        if (track) void recordRecommendationSignal(liked ? "unlike" : "like", track).catch(() => undefined);
-        return { likedIds: liked ? state.likedIds.filter((item) => item !== id) : [...state.likedIds, id] };
+      toggleLike: (track) => set((state) => {
+        const liked = state.likedIds.includes(track.id);
+        void recordRecommendationSignal(liked ? "unlike" : "like", track).catch(() => undefined);
+        return liked
+          ? { likedIds: state.likedIds.filter((item) => item !== track.id), likedTracks: state.likedTracks.filter((item) => item.id !== track.id) }
+          : { likedIds: [...state.likedIds, track.id], likedTracks: [...state.likedTracks, snapshotTrack(track)] };
       }),
       addToQueue: (track) => set((state) => ({ queue: [...state.queue, track] })),
       removeFromQueue: (index) => set((state) => {
@@ -183,14 +209,14 @@ export const usePlayerStore = create<PlayerState>()(
         else if (from > currentIndex && to <= currentIndex) currentIndex += 1;
         return { queue, currentIndex };
       }),
-      setLocalTracks: (localTracks) => set({ localTracks }),
+      setLocalTracks: (localTracks) => set({ localTracks, localTracksLoaded: true }),
       addLocalTrack: (track) => set((state) => ({ localTracks: [...state.localTracks, track] })),
       removeLocalTrack: (id) => set((state) => ({ localTracks: state.localTracks.filter((track) => track.id !== id), queue: state.queue.filter((track) => track.id !== id) })),
-      syncYouTubeLibrary: (tracks, playlists) => set((state) => ({
-        syncedTracks: tracks,
-        playlists: [...state.playlists.filter((playlist) => playlist.source !== "youtube"), ...playlists],
-      })),
-      createPlaylist: (name) => set((state) => ({ playlists: [...state.playlists, { id: crypto.randomUUID(), name, description: "Created in Auralume", trackIds: [], createdAt: new Date().toISOString(), source: "local" }] })),
+      createPlaylist: (name) => {
+        const id = createId();
+        set((state) => ({ playlists: [...state.playlists, { id, name: name.trim().slice(0, 60), description: "Playlist", trackIds: [], tracks: [], createdAt: new Date().toISOString(), source: "local" }] }));
+        return id;
+      },
       renamePlaylist: (playlistId, name) => set((state) => ({ playlists: state.playlists.map((playlist) => playlist.id === playlistId && playlist.source !== "youtube" ? { ...playlist, name: name.trim().slice(0, 60) || playlist.name } : playlist) })),
       deletePlaylist: (playlistId) => set((state) => ({ playlists: state.playlists.filter((playlist) => playlist.id !== playlistId || playlist.source === "youtube") })),
       addToPlaylist: (playlistId, track) => set((state) => ({ playlists: state.playlists.map((playlist) => playlist.id === playlistId && playlist.source !== "youtube" && !playlist.trackIds.includes(track.id) ? { ...playlist, trackIds: [...playlist.trackIds, track.id], tracks: [...(playlist.tracks ?? []), snapshotTrack(track)] } : playlist) })),
@@ -210,16 +236,47 @@ export const usePlayerStore = create<PlayerState>()(
       resetAppearance: () => set({ appearance: defaultAppearance }),
       clearPersonalData: async () => {
         await clearPersonalization();
-        set({ queue: [], currentIndex: -1, isPlaying: false, likedIds: [], history: [], localTracks: [], syncedTracks: [], playlists: [], preferences: emptyPreferences, equalizer: defaultEqualizer, appearance: defaultAppearance });
+        set({ queue: [], currentIndex: -1, isPlaying: false, likedIds: [], likedTracks: [], history: [], localTracks: [], syncedTracks: [], playlists: [], preferences: emptyPreferences, equalizer: defaultEqualizer, appearance: defaultAppearance });
       },
     }),
     {
       name: "aura-library-v1",
-      version: 7,
+      version: 9,
+      // Rehydrated by Providers after mount, so the first client render matches the
+      // server HTML; hydrating during render left controlled inputs out of sync.
+      skipHydration: true,
       migrate: (persistedState) => migratePersistedLibrary(persistedState),
-      partialize: (state) => ({ volume: state.volume, muted: state.muted, shuffle: state.shuffle, repeat: state.repeat, likedIds: state.likedIds, history: state.history.filter((track) => track.source !== "local"), syncedTracks: state.syncedTracks, playlists: state.playlists, preferences: state.preferences, equalizer: state.equalizer, appearance: state.appearance }),
+      partialize: (state) => {
+        const queue = state.queue.filter((track) => track.source !== "local");
+        const currentId = state.queue[state.currentIndex]?.id;
+        const currentIndex = currentId ? queue.findIndex((track) => track.id === currentId) : -1;
+        return { queue, currentIndex, volume: state.volume, muted: state.muted, shuffle: state.shuffle, repeat: state.repeat, likedIds: state.likedIds, likedTracks: state.likedTracks, history: state.history.filter((track) => track.source !== "local"), syncedTracks: state.syncedTracks, playlists: state.playlists, preferences: state.preferences, equalizer: state.equalizer, appearance: state.appearance };
+      },
     },
   ),
 );
 
 export const selectCurrentTrack = (state: PlayerState) => state.queue[state.currentIndex];
+
+/** Link to the full player that survives a reload by naming the track. */
+export const playerHref = (track: Pick<Track, "id">) => `/player?track=${encodeURIComponent(track.id)}`;
+
+/** Finds a track this browser already knows by id, for restoring the player from its URL. */
+export function findKnownTrack(state: PlayerState, id: string): Track | undefined {
+  const sources = [state.queue, state.localTracks, state.history, state.likedTracks, state.syncedTracks, ...state.playlists.map((playlist) => playlist.tracks ?? [])];
+  for (const tracks of sources) {
+    const track = tracks.find((item) => item.id === id);
+    // Snapshots of local files lose their blob URL; only the live IndexedDB copy is playable.
+    if (track && (track.source !== "local" || track.streamUrl)) return track;
+  }
+  return undefined;
+}
+
+/** True once the saved library has been loaded from browser storage (always false during SSR). */
+export function useStoreHydrated() {
+  return useSyncExternalStore(
+    (onChange) => usePlayerStore.persist.onFinishHydration(onChange),
+    () => usePlayerStore.persist.hasHydrated(),
+    () => false,
+  );
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeYouTubeSearchHtml } from "@/lib/youtube";
+import { decodeHtmlEntities, normalizeYouTubeSearchHtml } from "@/lib/youtube";
 
 function page(data: unknown) {
   return `<html><script>var ytInitialData = ${JSON.stringify(data)};</script></html>`;
@@ -47,5 +47,10 @@ describe("YouTube search normalization", () => {
 
   it("fails closed when YouTube does not return initial search data", () => {
     expect(() => normalizeYouTubeSearchHtml("<html>consent required</html>")).toThrow("search data");
+  });
+
+  it("decodes HTML entities that the Data API leaves in titles", () => {
+    expect(decodeHtmlEntities("Calm &amp; Collected &quot;Lo-Fi&quot; 90&#39;s &#x1F3B5;")).toBe("Calm & Collected \"Lo-Fi\" 90's 🎵");
+    expect(decodeHtmlEntities("Tom &unknown; Jerry")).toBe("Tom &unknown; Jerry");
   });
 });

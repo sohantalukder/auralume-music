@@ -7,12 +7,12 @@ export const contentType = "image/png";
 
 export default function OpenGraphImage() {
   return new ImageResponse(
-    <div style={{ alignItems: "center", background: "#0b0d09", color: "#f4f6ef", display: "flex", height: "100%", justifyContent: "center", padding: "72px", width: "100%" }}>
+    <div style={{ alignItems: "center", background: "#0b0a10", color: "#f4f6ef", display: "flex", height: "100%", justifyContent: "center", padding: "72px", width: "100%" }}>
       <div style={{ alignItems: "center", display: "flex", flexDirection: "column", maxWidth: "900px", textAlign: "center" }}>
-        <div style={{ alignItems: "center", background: "#b8f33c", borderRadius: "28px", display: "flex", gap: "10px", height: "112px", justifyContent: "center", marginBottom: "42px", width: "112px" }}>
+        <div style={{ alignItems: "center", background: "#ff7ab6", borderRadius: "28px", display: "flex", gap: "10px", height: "112px", justifyContent: "center", marginBottom: "42px", width: "112px" }}>
           {[46, 72, 54].map((height, index) => <span key={index} style={{ background: "#172300", borderRadius: "999px", display: "flex", height, width: "12px" }} />)}
         </div>
-        <div style={{ color: "#b8f33c", display: "flex", fontSize: "30px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase" }}>{APP_NAME}</div>
+        <div style={{ color: "#ff7ab6", display: "flex", fontSize: "30px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase" }}>{APP_NAME}</div>
         <div style={{ display: "flex", fontSize: "76px", fontWeight: 800, letterSpacing: "-0.05em", lineHeight: 1.05, marginTop: "18px" }}>Music, without the noise.</div>
         <div style={{ color: "#b8bea9", display: "flex", fontSize: "26px", lineHeight: 1.4, marginTop: "28px" }}>{APP_DESCRIPTION}</div>
       </div>

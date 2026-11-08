@@ -1,6 +1,6 @@
 # Auralume
 
-Auralume is an audio-only personal music web app built with Next.js. It searches YouTube for broad song coverage and plays YouTube's audio-only AAC/M4A stream through the native player, streams and downloads Creative Commons and public-domain MP3 audio from Internet Archive, and can optionally play MP3, AAC, WAV, and OGG files selected from your device. Google sign-in can import YouTube playlists and liked videos with read-only access. There is no subscription, hosted profile database, visible video player, or music-upload server.
+Auralume is an audio-only personal music web app built with Next.js. It searches YouTube for broad song coverage and plays YouTube's audio-only AAC/M4A stream through the native player, streams and downloads Creative Commons and public-domain MP3 audio from Internet Archive, and can optionally play MP3, AAC, WAV, and OGG files selected from your device. There is no account, sign-in, subscription, hosted profile database, visible video player, or music-upload server.
 
 ## Music sources
 
@@ -15,9 +15,8 @@ Auralume does not transcode YouTube media to MP3. It resolves YouTube's existing
 ## Features
 
 - Responsive desktop and mobile application shell
-- Native controls for Archive and device audio: seek, volume, queue, shuffle, repeat, likes, history, keyboard shortcuts, and Media Session controls
+- Native controls for every source (YouTube, Archive, device audio): seek, volume, queue, shuffle, repeat, likes, history, keyboard shortcuts, and Media Session controls
 - Broad song search through YouTube with audio-only native playback
-- Google sign-in and read-only YouTube playlist/liked-video sync
 - Type-ahead suggestions from recent searches, the synced library, and current results
 - Open-audio search and recommendations from the Internet Archive catalog
 - Validated MP3 downloads for Creative Commons and public-domain Archive tracks
@@ -40,9 +39,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Online search and playback work without API credentials. For production search, set `YOUTUBE_API_KEY` to use the official YouTube Data API and enable paginated results. Without it, Auralume falls back to the public YouTube results page; that fallback is limited to the first result batch and can change when YouTube changes its page structure. Google sign-in and YouTube library sync additionally require a Google OAuth web client with the YouTube Data API v3 enabled. Configure the authorized redirect URI as `http://localhost:3000/api/auth/callback/google` for local development (and the equivalent HTTPS URL in production), then set `NEXTAUTH_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` in `.env.local`.
-
-The official YouTube Data API exposes playlists and liked videos shared with YouTube Music; it does not expose a separate full YouTube Music listening-history sync.
+Online search and playback work without API credentials. For production search, set `YOUTUBE_API_KEY` to use the official YouTube Data API and enable paginated results. Without it, Auralume falls back to the public YouTube results page; that fallback is limited to the first result batch and can change when YouTube changes its page structure.
 
 ## Privacy
 
@@ -52,7 +49,6 @@ The official YouTube Data API exposes playlists and liked videos shared with You
 - Optional device audio files remain in the current browser’s IndexedDB and are never uploaded.
 - Track title and artist metadata are sent to LRCLIB only when lyrics are opened.
 - Listening history, likes, playlists, preferences, equalizer, custom colors, searches, and recommendation signals remain in browser storage and do not sync across devices.
-- Google access and refresh tokens are held in an encrypted, HTTP-only session cookie. Read-only YouTube sync runs only when requested.
 - No music or profile data is written to an Auralume hosted database.
 
 ## Verification
@@ -70,7 +66,8 @@ Browser tests mock the Archive catalog for deterministic online playback flows a
 ## Browser limitations
 
 - The first playback may require a user gesture.
-- YouTube audio may be unavailable because of account requirements, regional restrictions, age restrictions, removal, or upstream protocol changes.
+- YouTube audio may be unavailable because of account requirements, regional restrictions, age restrictions, removal, or upstream protocol changes. YouTube also frequently challenges or blocks datacenter IP ranges (including serverless hosts such as Vercel); when a stream fails after one retry the player skips to the next track.
+- Background and lock-screen playback works because every source plays through one native audio element with Media Session metadata. With the equalizer enabled, iOS may still pause audio when it suspends Web Audio; the player resumes it when possible.
 - YouTube result order is the order returned to Auralume by its configured provider and can differ from a signed-in, region-personalized YouTube session. The credential-free fallback has no pagination.
 
 ## GitHub CI/CD

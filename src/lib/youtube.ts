@@ -106,6 +106,19 @@ export function normalizeYouTubeSearchHtml(html: string): Track[] {
   return tracks;
 }
 
+const NAMED_ENTITIES: Record<string, string> = { amp: "&", quot: "\"", apos: "'", lt: "<", gt: ">", nbsp: " " };
+
+/** The Data API returns HTML-escaped snippets ("&amp;", "&#39;"); decode them for display. */
+export function decodeHtmlEntities(value: string) {
+  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
+    if (entity[0] === "#") {
+      const code = entity[1].toLowerCase() === "x" ? Number.parseInt(entity.slice(2), 16) : Number(entity.slice(1));
+      return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    }
+    return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
+  });
+}
+
 export function normalizeYouTubeDataApiItems(value: unknown): Track[] {
   const items = record(value)?.items;
   if (!Array.isArray(items)) return [];
@@ -114,8 +127,8 @@ export function normalizeYouTubeDataApiItems(value: unknown): Track[] {
     const node = record(item);
     const videoId = record(node?.id)?.videoId;
     const snippet = record(node?.snippet);
-    const title = typeof snippet?.title === "string" ? snippet.title.trim() : "";
-    const artist = typeof snippet?.channelTitle === "string" ? snippet.channelTitle.trim() : "YouTube creator";
+    const title = typeof snippet?.title === "string" ? decodeHtmlEntities(snippet.title).trim() : "";
+    const artist = typeof snippet?.channelTitle === "string" ? decodeHtmlEntities(snippet.channelTitle).trim() : "YouTube creator";
     if (typeof videoId !== "string" || !VIDEO_ID.test(videoId) || seen.has(videoId) || !title) return [];
     seen.add(videoId);
     const thumbnails = record(snippet?.thumbnails);
