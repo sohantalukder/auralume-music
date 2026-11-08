@@ -21,9 +21,9 @@ describe("YouTube audio resolution", () => {
       decipher,
     };
     const chooseFormat = vi.fn().mockReturnValue(format);
+    const blocked = { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you're not a bot" }, chooseFormat: vi.fn() };
     const innertube = {
-      getStreamingData: vi.fn().mockRejectedValue(new Error("Streaming data not available")),
-      getBasicInfo: vi.fn().mockResolvedValue({ chooseFormat }),
+      getBasicInfo: vi.fn().mockResolvedValueOnce(blocked).mockResolvedValueOnce(blocked).mockResolvedValue({ playability_status: { status: "OK" }, chooseFormat }),
       session: { player: {} },
     };
     vi.mocked(Innertube.create).mockResolvedValue(innertube as never);
@@ -31,7 +31,9 @@ describe("YouTube audio resolution", () => {
 
     const target = await resolveYouTubeAudio("IF9GJstin2g");
 
-    expect(innertube.getStreamingData).toHaveBeenCalledTimes(2);
+    expect(innertube.getBasicInfo).toHaveBeenNthCalledWith(1, "IF9GJstin2g", { client: "VISIONOS" });
+    expect(innertube.getBasicInfo).toHaveBeenNthCalledWith(2, "IF9GJstin2g", { client: "IOS" });
+    expect(blocked.chooseFormat).not.toHaveBeenCalled();
     expect(innertube.getBasicInfo).toHaveBeenCalledWith("IF9GJstin2g", { client: "MWEB", po_token: "content-token" });
     expect(chooseFormat).toHaveBeenCalledWith({ format: "mp4", quality: "best", type: "audio" });
     expect(decipher).toHaveBeenCalledWith(innertube.session.player);
@@ -44,12 +46,35 @@ describe("YouTube audio resolution", () => {
     vi.resetModules();
     const { Innertube: FreshInnertube } = await import("youtubei.js");
     const { resolveYouTubeAudio: freshResolve } = await import("@/lib/youtube-audio");
+    const format = {
+      mime_type: "audio/mp4",
+      content_length: 1000,
+      decipher: vi.fn().mockResolvedValue("https://rr1---sn.example.googlevideo.com/videoplayback?expire=2000000000"),
+    };
     const innertube = {
-      getStreamingData: vi.fn().mockResolvedValue({ url: "https://rr1---sn.example.googlevideo.com/videoplayback?expire=2000000000", mime_type: "audio/mp4", content_length: 1000 }),
+      getBasicInfo: vi.fn().mockResolvedValue({ playability_status: { status: "OK" }, chooseFormat: () => format }),
+      session: { player: {} },
     };
     vi.mocked(FreshInnertube.create).mockRejectedValueOnce(new Error("network down")).mockResolvedValueOnce(innertube as never);
 
     await expect(freshResolve("dQw4w9WgXcQ")).rejects.toThrow("network down");
     await expect(freshResolve("dQw4w9WgXcQ")).resolves.toMatchObject({ contentLength: 1000, maxRangeBytes: 1024 * 1024 });
+  });
+
+  it("reports each client's playability refusal when no stream is available", async () => {
+    vi.resetModules();
+    const { Innertube: FreshInnertube } = await import("youtubei.js");
+    const { getYouTubeContentPoToken: freshToken } = await import("@/lib/youtube-potoken");
+    const { resolveYouTubeAudio: freshResolve } = await import("@/lib/youtube-audio");
+    const innertube = {
+      getBasicInfo: vi.fn().mockResolvedValue({ playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you're not a bot" }, chooseFormat: vi.fn() }),
+      session: { player: {} },
+    };
+    vi.mocked(FreshInnertube.create).mockResolvedValue(innertube as never);
+    vi.mocked(freshToken).mockResolvedValue("content-token");
+
+    await expect(freshResolve("M8syt1aCOg0")).rejects.toThrow(
+      "VISIONOS LOGIN_REQUIRED: Sign in to confirm you're not a bot; IOS LOGIN_REQUIRED: Sign in to confirm you're not a bot; MWEB LOGIN_REQUIRED: Sign in to confirm you're not a bot",
+    );
   });
 });

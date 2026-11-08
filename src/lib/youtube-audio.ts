@@ -49,38 +49,47 @@ function cacheExpiry(urlValue: string) {
   return Math.min(safeExpiry, Date.now() + CACHE_FALLBACK_MS);
 }
 
+type BasicInfo = Awaited<ReturnType<Innertube["getBasicInfo"]>>;
+
+// chooseFormat only reports "Streaming data not available"; keep YouTube's own
+// refusal (for example a bot check on datacenter IPs) so failures are diagnosable.
+function audioFormat(info: BasicInfo) {
+  const status = info.playability_status;
+  if (status && status.status !== "OK") throw new Error(`${status.status}: ${status.reason || "no reason given"}`);
+  return info.chooseFormat({ format: "mp4", quality: "best", type: "audio" });
+}
+
 async function resolveFresh(videoId: string) {
   const innertube = await client();
-  let lastError: unknown;
+  const failures: string[] = [];
   for (const option of [{ client: "VISIONOS" as const, maxRangeBytes: 1024 * 1024 }, { client: "IOS" as const, maxRangeBytes: 16 * 1024 }]) {
     try {
-      const format = await innertube.getStreamingData(videoId, {
-        client: option.client,
-        format: "mp4",
-        quality: "best",
-        type: "audio",
-      });
-      if (!format.url) throw new Error("No audio stream URL");
-      const target = validateTarget(format.url, format.mime_type, Number(format.content_length), option.maxRangeBytes);
+      const format = audioFormat(await innertube.getBasicInfo(videoId, { client: option.client }));
+      const url = await format.decipher(innertube.session.player);
+      if (!url) throw new Error("No audio stream URL");
+      const target = validateTarget(url, format.mime_type, Number(format.content_length), option.maxRangeBytes);
       targets.set(videoId, { target, expiresAt: cacheExpiry(target.url) });
       return target;
     } catch (error) {
-      lastError = error;
+      failures.push(`${option.client} ${errorMessage(error)}`);
     }
   }
   try {
     const poToken = await getYouTubeContentPoToken(videoId);
-    const info = await innertube.getBasicInfo(videoId, { client: "MWEB", po_token: poToken });
-    const format = info.chooseFormat({ format: "mp4", quality: "best", type: "audio" });
+    const format = audioFormat(await innertube.getBasicInfo(videoId, { client: "MWEB", po_token: poToken }));
     const streamUrl = new URL(await format.decipher(innertube.session.player));
     streamUrl.searchParams.set("pot", poToken);
     const target = validateTarget(streamUrl.href, format.mime_type, Number(format.content_length), 16 * 1024);
     targets.set(videoId, { target, expiresAt: cacheExpiry(target.url) });
     return target;
   } catch (error) {
-    lastError = error;
+    failures.push(`MWEB ${errorMessage(error)}`);
   }
-  throw lastError instanceof Error ? lastError : new Error("No audio stream available");
+  throw new Error(failures.join("; "));
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 export async function resolveYouTubeAudio(videoId: string, forceRefresh = false) {

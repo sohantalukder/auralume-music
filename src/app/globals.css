@@ -112,8 +112,10 @@ img { display: block; }
 .app-button-secondary { color: var(--accent) !important; border-color: transparent !important; background: color-mix(in srgb, var(--foreground) 9%, transparent) !important; box-shadow: none; backdrop-filter: var(--glass-blur-thin); }
 .app-button-secondary:hover { background: color-mix(in srgb, var(--foreground) 14%, transparent) !important; }
 /* iOS-style press feedback on tappable controls. */
-.app-button, .action-chip, .mood-chips a, .new-playlist-row, .add-song-button, .play-button, .full-play-button { transition: transform .12s ease, background .15s ease; }
-.app-button:active, .action-chip:active, .mood-chips a:active, .new-playlist-row:active, .play-button:active, .full-play-button:active { transform: scale(.97); }
+.app-button, .action-chip, .mood-chips a, .new-playlist-row, .add-song-button { transition: transform .12s ease, background .15s ease; }
+.app-button:active, .action-chip:active, .mood-chips a:active, .new-playlist-row:active { transform: scale(.97); }
+/* Motion owns the play buttons' transform (whileTap); a CSS transform transition would ease every animation frame and make it judder. */
+.play-button, .full-play-button { transition: background .15s ease; }
 .app-button-ghost { color: var(--muted) !important; background: transparent !important; }
 .app-button-danger { color: var(--danger) !important; background: color-mix(in srgb, var(--danger) 11%, transparent) !important; }
 .app-button-sm { min-height: 32px; padding-inline: 12px; border-radius: 8px; font-size: var(--text-footnote); }
@@ -234,7 +236,8 @@ img { display: block; }
 .app-frame, .sidebar, .player-shell { transition-duration: .22s; transition-timing-function: ease; }
 .app-frame { transition-property: padding-left; }
 .sidebar { transition-property: width, padding; overflow: hidden; }
-.player-shell { transition-property: left, transform, opacity; }
+/* Only `left` (sidebar collapse): Motion animates the mini player's transform and opacity, and a CSS transition on those would ease every frame and shake it. */
+.player-shell { transition-property: left; }
 .side-nav a span, .side-heading, .sidebar-header .logo strong { transition: opacity .15s ease; white-space: nowrap; }
 .sidebar-toggle { display: grid; flex: 0 0 auto; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; transition: background .15s, color .15s; }
 .sidebar-toggle:hover { color: var(--foreground); background: color-mix(in srgb, var(--foreground) 8%, transparent); }
