@@ -266,7 +266,8 @@ img { display: block; }
 .search-clear { width: 30px; height: 30px; border-radius: 50%; color: var(--muted); }
 .search-clear:hover { color: var(--foreground); background: var(--surface-elevated); }
 .search-submit { width: 38px; height: 38px; border-left: 1px solid var(--border); }
-.global-search-menu { position: absolute; z-index: 80; top: calc(100% + 10px); right: 0; left: 0; max-height: min(68vh, 680px); overflow-x: hidden; overflow-y: auto; contain: layout paint; padding: 8px; border-radius: 18px; background: var(--material-thick); backdrop-filter: var(--glass-blur-thick); -webkit-backdrop-filter: var(--glass-blur-thick); box-shadow: var(--glass-edge), var(--glass-shadow); }
+/* Solid, not glass: inside the blurred topbar a nested backdrop-filter cannot blur the page, so translucent results let the page show through. */
+.global-search-menu { position: absolute; z-index: 80; top: calc(100% + 10px); right: 0; left: 0; max-height: min(68vh, 680px); overflow-x: hidden; overflow-y: auto; contain: layout paint; padding: 8px; border-radius: 18px; background: var(--surface); box-shadow: var(--glass-edge), var(--glass-shadow); }
 .global-search-menu > button { display: grid; grid-template-columns: 30px minmax(0, 1fr) 76px; align-items: center; gap: 13px; width: 100%; min-height: 64px; overflow: hidden; padding: 8px 10px; border: 0; border-radius: 12px; color: var(--foreground); text-align: left; background: transparent; cursor: pointer; }
 .global-search-menu > button:hover, .global-search-menu > button.active { background: var(--surface-elevated); }
 .global-search-menu > button > svg { color: var(--muted); }
@@ -695,3 +696,7 @@ kbd { padding: 2px 6px; border: 0; border-radius: 6px; color: var(--muted); back
   .empty-state { padding: 40px 18px; }
   .skeleton-track-row { grid-template-columns: 22px 42px minmax(0, 1fr); }
   .skeleton-album { display: none; }
+
+/* Off-screen host for the YouTube IFrame player that plays YouTube tracks. */
+.youtube-player-host { position: fixed; top: 0; left: -10000px; width: 320px; height: 180px; overflow: hidden; opacity: 0; pointer-events: none; }
+.youtube-player-host iframe { display: block; width: 100%; height: 100%; border: 0; }

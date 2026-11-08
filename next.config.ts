@@ -4,7 +4,8 @@ import type { NextConfig } from "next";
 // scripts need 'unsafe-inline' unless nonces are added through a proxy.
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com",
+  "frame-src https://www.youtube.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com https://archive.org https://*.archive.org",
   "media-src 'self' blob: https://archive.org https://*.archive.org",
